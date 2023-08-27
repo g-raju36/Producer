@@ -1,0 +1,157 @@
+---------------Producer example----------------------------------------------------------------
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.config.EnableJpaRepositories;
+import org.springframework.stereotype.Repository;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import javax.persistence.Entity;
+import javax.persistence.GeneratedValue;
+import javax.persistence.GenerationType;
+import javax.persistence.Id;
+import java.util.List;
+
+@SpringBootApplication
+public class ProducerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ProducerApplication.class, args);
+    }
+}
+
+@Entity
+class EntitlementsUserBO {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    private String userName;
+    private int runId;
+
+    // Constructors, getters, and setters...
+
+    public EntitlementsUserBO() {
+    }
+
+    public EntitlementsUserBO(String userName, int runId) {
+        this.userName = userName;
+        this.runId = runId;
+    }
+}
+
+@Repository
+interface EntitlementsUserRepository extends JpaRepository<EntitlementsUserBO, Long> {
+    Page<EntitlementsUserBO> findByRunIdAndUserIdLikeOrderByUserId(int runId, String userIdPattern, PageRequest pageRequest);
+}
+
+@RestController
+class EntitlementsController {
+
+    private final EntitlementsUserRepository userRepository;
+
+    public EntitlementsController(EntitlementsUserRepository userRepository) {
+        this.userRepository = userRepository;
+    }
+
+    @GetMapping("/paginated-data")
+    public List<EntitlementsUserBO> getPaginatedData(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(defaultValue = "E879880") String userIdPattern) {
+        try {
+            int runId = 123; // Set the appropriate constant runId
+
+            if (page < 1 || pageSize <= 0) {
+                throw new IllegalArgumentException("Invalid page or pageSize");
+            }
+
+            // Calculate the offset (page - 1) * pageSize
+            int offset = (page - 1) * pageSize;
+
+            // Create a PageRequest for the specified page and pageSize
+            PageRequest pageRequest = PageRequest.of(page - 1, pageSize);
+
+            // Fetch data from the database based on runId, userIdPattern, and pagination
+            Page<EntitlementsUserBO> pageData = userRepository.findByRunIdAndUserIdLikeOrderByUserId(runId, userIdPattern, pageRequest);
+
+            // Extract the content (data) from the Page
+            List<EntitlementsUserBO> paginatedData = pageData.getContent();
+
+            return paginatedData;
+        } catch (Exception e) {
+            throw new RuntimeException("Error fetching paginated data", e);
+        }
+    }
+}
+
+----------------------Consumer example-------------------
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
+import org.springframework.web.reactive.function.client.WebClient;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+
+@SpringBootApplication
+public class ConsumerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ConsumerApplication.class, args);
+    }
+}
+
+@SpringBootApplication
+class PaginatedDataConsumer {
+
+    public PaginatedDataConsumer(WebClient.Builder webClientBuilder) {
+        WebClient webClient = webClientBuilder.baseUrl("http://localhost:8080").build();
+
+        int pageSize = 10; // Number of records per page
+        int currentPage = 1; // Starting page
+
+        try {
+            while (true) {
+                Flux<EntitlementsUserBO> paginatedData = webClient.get()
+                        .uri("/paginated-data?page=" + currentPage + "&pageSize=" + pageSize)
+                        .accept(MediaType.APPLICATION_JSON)
+                        .retrieve()
+                        .onStatus(HttpStatus::is4xxClientError, clientResponse ->
+                            Mono.error(new RuntimeException("Client error: " + clientResponse.statusCode())))
+                        .onStatus(HttpStatus::is5xxServerError, serverResponse ->
+                            Mono.error(new RuntimeException("Server error: " + serverResponse.statusCode())))
+                        .bodyToFlux(EntitlementsUserBO.class);
+
+                // Process the paginated data asynchronously
+                paginatedData
+                    .doOnNext(user -> {
+                        // Process each EntitlementsUserBO object as needed
+                        System.out.println("User: " + user.getUserId() + ", Name: " + user.getUserName());
+                    })
+                    .blockLast(); // Block until all data is processed
+
+                // Check if there are more pages
+                if (paginatedData.count().block() < pageSize) {
+                    // No more pages, exit the loop
+                    break;
+                }
+
+                // Increment the current page
+                currentPage++;
+            }
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
+    }
+}
+
+class EntitlementsUserBO {
+    private String userName;
+    private int userId;
+
+    // Getter methods...
+}
