@@ -1,0 +1,84 @@
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.core.RowMapper;
+import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.RequestParam;
+import org.springframework.web.bind.annotation.RestController;
+
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.util.List;
+
+@SpringBootApplication
+public class ProducerApplication {
+
+    public static void main(String[] args) {
+        SpringApplication.run(ProducerApplication.class, args);
+    }
+}
+
+@RestController
+class EntitlementsController {
+
+    private final JdbcTemplate jdbcTemplate;
+
+    public EntitlementsController(JdbcTemplate jdbcTemplate) {
+        this.jdbcTemplate = jdbcTemplate;
+    }
+
+    @GetMapping("/paginated-data")
+    public ResponseEntity<List<EntitlementsUserBO>> getPaginatedData(
+            @RequestParam(defaultValue = "1") int page,
+            @RequestParam(defaultValue = "10") int pageSize,
+            @RequestParam(defaultValue = "E879880") String userIdPattern) {
+        try {
+            int runId = 123; // Set the appropriate constant runId
+
+            if (page < 1 || pageSize <= 0) {
+                throw new IllegalArgumentException("Invalid page or pageSize");
+            }
+
+            // Calculate the offset (page - 1) * pageSize
+            int offset = (page - 1) * pageSize;
+
+            // SQL query to retrieve paginated data
+            String sql = "SELECT * FROM your_table_name WHERE runId = ? AND UserId LIKE ? ORDER BY UserId LIMIT ?, ?";
+
+            // Define a RowMapper to map the result set to your entity
+            RowMapper<EntitlementsUserBO> rowMapper = new RowMapper<EntitlementsUserBO>() {
+                @Override
+                public EntitlementsUserBO mapRow(ResultSet rs, int rowNum) throws SQLException {
+                    return new EntitlementsUserBO(rs.getString("UserName"), rs.getInt("runId"));
+                }
+            };
+
+            // Execute the SQL query with pagination
+            List<EntitlementsUserBO> paginatedData = jdbcTemplate.query(
+                    sql,
+                    new Object[]{runId, userIdPattern, offset, pageSize},
+                    rowMapper);
+
+            return ResponseEntity.ok(paginatedData);
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
+    }
+}
+
+class EntitlementsUserBO {
+    private String userName;
+    private int runId;
+
+    // Constructors, getters, and setters...
+
+    public EntitlementsUserBO() {
+    }
+
+    public EntitlementsUserBO(String userName, int runId) {
+        this.userName = userName;
+        this.runId = runId;
+    }
+}
